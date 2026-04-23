@@ -2,63 +2,51 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>MAT KINGS</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  html, body { background: #0F0F0F; width: 100%; height: 100%; overflow: hidden; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; touch-action: none; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <script>
-// ============================================================
-// MAT KINGS — Retro Arcade Wrestling
-// Tecmo Bowl meets the mat. Built by Anvil.
-// ============================================================
-
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-// Native resolution (scaled up)
-const W = 320;
-const H = 240;
+// Portrait resolution for mobile
+const W = 360;
+const H = 640;
 canvas.width = W;
 canvas.height = H;
 
-// Scale to fit screen
 function resize() {
-  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  const sw = window.innerWidth;
+  const sh = window.innerHeight;
+  const scale = Math.min(sw / W, sh / H);
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
+  canvas.style.position = 'absolute';
+  canvas.style.left = ((sw - W * scale) / 2) + 'px';
+  canvas.style.top = ((sh - H * scale) / 2) + 'px';
 }
 resize();
 window.addEventListener('resize', resize);
 
-// ============================================================
-// AUDIO — Retro chip-tune sounds
-// ============================================================
+// Audio
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
-function initAudio() {
-  if (!audioCtx) audioCtx = new AudioCtx();
-}
-
-function playSound(freq, duration, type='square', vol=0.1) {
+function initAudio() { if (!audioCtx) audioCtx = new AudioCtx(); }
+function playSound(freq, dur, type='square', vol=0.1) {
   if (!audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  g.gain.setValueAtAtTime(vol, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
 }
-
 function sfxSelect() { playSound(660, 0.08); playSound(880, 0.08); }
 function sfxHit() { playSound(150, 0.15, 'sawtooth', 0.15); }
 function sfxTakedown() { playSound(200, 0.1); playSound(100, 0.2, 'sawtooth', 0.15); }
@@ -67,907 +55,726 @@ function sfxPin() { playSound(440, 0.1); playSound(550, 0.1); playSound(660, 0.1
 function sfxWhistle() { playSound(800, 0.15, 'sine', 0.12); setTimeout(() => playSound(800, 0.3, 'sine', 0.12), 180); }
 function sfxBuzz() { playSound(200, 0.4, 'sawtooth', 0.08); }
 
-// ============================================================
-// INPUT
-// ============================================================
+// Input
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.code] = true; e.preventDefault(); });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-// ============================================================
-// COLORS — NES palette
-// ============================================================
+// Touch system
+let touchAreas = [];
+let touchHit = null;
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  initAudio();
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  for (let t of e.changedTouches) {
+    const tx = (t.clientX - rect.left) * scaleX;
+    const ty = (t.clientY - rect.top) * scaleY;
+    for (let i = touchAreas.length - 1; i >= 0; i--) {
+      const a = touchAreas[i];
+      if (tx >= a.x && tx <= a.x + a.w && ty >= a.y && ty <= a.y + a.h) {
+        touchHit = a.id;
+        break;
+      }
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => { e.preventDefault(); }, { passive: false });
+
+function consumeTouch() {
+  const t = touchHit;
+  touchHit = null;
+  return t;
+}
+
+function addTouch(id, x, y, w, h) {
+  touchAreas.push({ id, x, y, w, h });
+}
+
+// Colors — USA Wrestling palette
 const C = {
-  BLACK: '#0F0F0F',
-  WHITE: '#FCFCFC',
-  RED: '#A01000',
-  BRIGHT_RED: '#E44028',
-  BLUE: '#0058F8',
-  BRIGHT_BLUE: '#3CBCFC',
-  GREEN: '#00A800',
-  BRIGHT_GREEN: '#58F898',
-  YELLOW: '#F8D878',
-  ORANGE: '#E45C10',
-  SKIN: '#F8B8F8',
-  SKIN_DARK: '#A86820',
-  BROWN: '#783000',
-  GRAY: '#7C7C7C',
-  DARK_GRAY: '#444444',
-  LIGHT_GRAY: '#BCBCBC',
-  PURPLE: '#6828B8',
-  MAT_GREEN: '#005800',
-  MAT_GREEN2: '#003800',
-  GOLD: '#F8D830',
-  CYAN: '#00E8D8',
+  BLACK: '#0F0F0F', WHITE: '#FCFCFC',
+  RED: '#B22234', BRIGHT_RED: '#E44028', DARK_RED: '#8B0000',
+  BLUE: '#002868', BRIGHT_BLUE: '#3C5A99', NAVY: '#001F5B',
+  GREEN: '#00A800', BRIGHT_GREEN: '#58F898',
+  YELLOW: '#F8D878', GOLD: '#F8D830', ORANGE: '#E45C10',
+  SKIN: '#F0C090', SKIN2: '#C69060',
+  BROWN: '#783000', GRAY: '#7C7C7C', DARK_GRAY: '#333333', LIGHT_GRAY: '#BCBCBC',
+  MAT_RED: '#9B2335', MAT_BLUE: '#1A3C6E',
+  MAT_CENTER: '#FCFCFC',
+  PURPLE: '#6828B8', CYAN: '#00E8D8',
 };
 
-// ============================================================
-// WRESTLERS
-// ============================================================
+// Wrestlers
 const WRESTLERS = [
-  {
-    name: 'IRON MIKE',
-    school: 'Lincoln HS',
-    color: C.BRIGHT_RED,
-    color2: C.RED,
-    str: 9, spd: 5, tec: 6, sta: 8,
+  { name: 'IRON MIKE', school: 'Lincoln HS', state: 'IA', color: C.BRIGHT_RED, color2: C.DARK_RED, singlet: C.BRIGHT_RED, str: 9, spd: 5, tec: 6, sta: 8,
     moves: [
-      { name: 'DOUBLE LEG', type: 'takedown', power: 9, beat: 'grapple', icon: 'DL' },
-      { name: 'HIP TOSS', type: 'throw', power: 8, beat: 'takedown', icon: 'HT' },
-      { name: 'HALF NELSON', type: 'pin', power: 7, beat: 'throw', icon: 'HN' },
-      { name: 'SPRAWL', type: 'defense', power: 7, beat: 'takedown', icon: 'SP' },
-    ],
-    // Pixel art frames (8x12 sprites, encoded as rows of palette indices)
-  },
-  {
-    name: 'LIGHTNING LEE',
-    school: 'Central HS',
-    color: C.BRIGHT_BLUE,
-    color2: C.BLUE,
-    str: 4, spd: 9, tec: 8, sta: 5,
+      { name: 'DOUBLE LEG', type: 'takedown', power: 9, beat: 'grapple', icon: 'DL', pts: 2 },
+      { name: 'HIP TOSS', type: 'throw', power: 8, beat: 'takedown', icon: 'HT', pts: 2 },
+      { name: 'HALF NELSON', type: 'pin', power: 7, beat: 'throw', icon: 'HN', pts: 3 },
+      { name: 'SPRAWL', type: 'defense', power: 7, beat: 'takedown', icon: 'SP', pts: 1 },
+    ]},
+  { name: 'LIGHTNING LEE', school: 'Central HS', state: 'PA', color: C.BRIGHT_BLUE, color2: C.NAVY, singlet: C.BRIGHT_BLUE, str: 4, spd: 9, tec: 8, sta: 5,
     moves: [
-      { name: 'SINGLE LEG', type: 'takedown', power: 7, beat: 'grapple', icon: 'SL' },
-      { name: 'ARM THROW', type: 'throw', power: 6, beat: 'takedown', icon: 'AT' },
-      { name: 'CRADLE', type: 'pin', power: 8, beat: 'throw', icon: 'CR' },
-      { name: 'DODGE', type: 'defense', power: 8, beat: 'takedown', icon: 'DG' },
-    ],
-  },
-  {
-    name: 'THE BULL',
-    school: 'Riverside HS',
-    color: C.ORANGE,
-    color2: C.BROWN,
-    str: 10, spd: 3, tec: 4, sta: 9,
+      { name: 'SINGLE LEG', type: 'takedown', power: 7, beat: 'grapple', icon: 'SL', pts: 2 },
+      { name: 'ARM THROW', type: 'throw', power: 6, beat: 'takedown', icon: 'AT', pts: 2 },
+      { name: 'CRADLE', type: 'pin', power: 8, beat: 'throw', icon: 'CR', pts: 3 },
+      { name: 'ESCAPE', type: 'defense', power: 8, beat: 'takedown', icon: 'ES', pts: 1 },
+    ]},
+  { name: 'THE BULL', school: 'Riverside HS', state: 'OH', color: C.ORANGE, color2: C.BROWN, singlet: C.ORANGE, str: 10, spd: 3, tec: 4, sta: 9,
     moves: [
-      { name: 'FIREMAN', type: 'takedown', power: 10, beat: 'grapple', icon: 'FM' },
-      { name: 'BODY SLAM', type: 'throw', power: 9, beat: 'takedown', icon: 'BS' },
-      { name: 'BEAR HUG', type: 'pin', power: 6, beat: 'throw', icon: 'BH' },
-      { name: 'SHRUG', type: 'defense', power: 6, beat: 'takedown', icon: 'SH' },
-    ],
-  },
-  {
-    name: 'COBRA KAI',
-    school: 'Eastside HS',
-    color: C.BRIGHT_GREEN,
-    color2: C.GREEN,
-    str: 6, spd: 7, tec: 9, sta: 6,
+      { name: 'FIREMAN', type: 'takedown', power: 10, beat: 'grapple', icon: 'FM', pts: 2 },
+      { name: 'BODY SLAM', type: 'throw', power: 9, beat: 'takedown', icon: 'BS', pts: 2 },
+      { name: 'BEAR HUG', type: 'pin', power: 6, beat: 'throw', icon: 'BH', pts: 3 },
+      { name: 'SHRUG', type: 'defense', power: 6, beat: 'takedown', icon: 'SH', pts: 1 },
+    ]},
+  { name: 'COBRA KAI', school: 'Eastside HS', state: 'CA', color: C.BRIGHT_GREEN, color2: C.GREEN, singlet: C.BRIGHT_GREEN, str: 6, spd: 7, tec: 9, sta: 6,
     moves: [
-      { name: 'ANKLE PICK', type: 'takedown', power: 7, beat: 'grapple', icon: 'AP' },
-      { name: 'HEADLOCK', type: 'throw', power: 7, beat: 'takedown', icon: 'HL' },
-      { name: 'GUILLOTINE', type: 'pin', power: 9, beat: 'throw', icon: 'GT' },
-      { name: 'COUNTER', type: 'defense', power: 9, beat: 'takedown', icon: 'CT' },
-    ],
-  },
-  {
-    name: 'THUNDER HAWK',
-    school: 'Westfield HS',
-    color: C.YELLOW,
-    color2: C.BROWN,
-    str: 7, spd: 6, tec: 7, sta: 7,
+      { name: 'ANKLE PICK', type: 'takedown', power: 7, beat: 'grapple', icon: 'AP', pts: 2 },
+      { name: 'HEADLOCK', type: 'throw', power: 7, beat: 'takedown', icon: 'HL', pts: 2 },
+      { name: 'GUILLOTINE', type: 'pin', power: 9, beat: 'throw', icon: 'GT', pts: 3 },
+      { name: 'REVERSAL', type: 'defense', power: 9, beat: 'takedown', icon: 'RV', pts: 2 },
+    ]},
+  { name: 'THUNDER HAWK', school: 'Westfield HS', state: 'OK', color: C.YELLOW, color2: C.BROWN, singlet: C.YELLOW, str: 7, spd: 6, tec: 7, sta: 7,
     moves: [
-      { name: 'HIGH CROTCH', type: 'takedown', power: 8, beat: 'grapple', icon: 'HC' },
-      { name: 'DUCK UNDER', type: 'throw', power: 7, beat: 'takedown', icon: 'DU' },
-      { name: 'TILT', type: 'pin', power: 8, beat: 'throw', icon: 'TL' },
-      { name: 'STANDUP', type: 'defense', power: 7, beat: 'takedown', icon: 'SU' },
-    ],
-  },
-  {
-    name: 'SHADOW',
-    school: 'State Champ',
-    color: C.PURPLE,
-    color2: C.DARK_GRAY,
-    str: 8, spd: 8, tec: 8, sta: 8,
+      { name: 'HIGH CROTCH', type: 'takedown', power: 8, beat: 'grapple', icon: 'HC', pts: 2 },
+      { name: 'DUCK UNDER', type: 'throw', power: 7, beat: 'takedown', icon: 'DU', pts: 2 },
+      { name: 'TILT', type: 'pin', power: 8, beat: 'throw', icon: 'TL', pts: 3 },
+      { name: 'STANDUP', type: 'defense', power: 7, beat: 'takedown', icon: 'SU', pts: 1 },
+    ]},
+  { name: 'SHADOW', school: 'State Champ', state: 'USA', color: C.PURPLE, color2: C.DARK_GRAY, singlet: C.PURPLE, str: 8, spd: 8, tec: 8, sta: 8,
     moves: [
-      { name: 'BLAST DOUBLE', type: 'takedown', power: 9, beat: 'grapple', icon: 'BD' },
-      { name: 'SUPLEX', type: 'throw', power: 9, beat: 'takedown', icon: 'SX' },
-      { name: 'STICKBACK', type: 'pin', power: 9, beat: 'throw', icon: 'SB' },
-      { name: 'REVERSAL', type: 'defense', power: 9, beat: 'takedown', icon: 'RV' },
-    ],
-  },
+      { name: 'BLAST DOUBLE', type: 'takedown', power: 9, beat: 'grapple', icon: 'BD', pts: 2 },
+      { name: 'SUPLEX', type: 'throw', power: 9, beat: 'takedown', icon: 'SX', pts: 2 },
+      { name: 'STICKBACK', type: 'pin', power: 9, beat: 'throw', icon: 'SB', pts: 3 },
+      { name: 'COUNTER', type: 'defense', power: 9, beat: 'takedown', icon: 'CT', pts: 2 },
+    ]},
 ];
 
-// ============================================================
-// GAME STATE
-// ============================================================
-const STATES = {
-  TITLE: 'title',
-  SELECT: 'select',
-  VERSUS: 'versus',
-  MATCH_INTRO: 'match_intro',
-  MOVE_SELECT: 'move_select',
-  MOVE_ANIM: 'move_anim',
-  RESULT: 'result',
-  SCORE: 'score',
-  PERIOD_END: 'period_end',
-  MATCH_END: 'match_end',
-  TOURNAMENT_WIN: 'tournament_win',
-  GAME_OVER: 'game_over',
-};
+// Game State
+const STATES = { TITLE:'title', SELECT:'select', VERSUS:'versus', MATCH_INTRO:'match_intro', MOVE_SELECT:'move_select', MOVE_ANIM:'move_anim', RESULT:'result', SCORE:'score', PERIOD_END:'period_end', MATCH_END:'match_end', TOURNAMENT_WIN:'tournament_win', GAME_OVER:'game_over' };
 
-let state = STATES.TITLE;
-let selectedWrestler = 0;
-let cursorPos = 0;
-let p1Wrestler = null;
-let p2Wrestler = null;
-let p1Score = 0;
-let p2Score = 0;
-let p1Stamina = 100;
-let p2Stamina = 100;
-let period = 1;
-let moveClock = 30; // seconds in period
-let moveClockTimer = 0;
-let p1Move = null;
-let p2Move = null;
-let animTimer = 0;
-let animPhase = '';
-let resultText = '';
-let resultTimer = 0;
-let versusTimer = 0;
-let matchIntroTimer = 0;
-let periodEndTimer = 0;
-let matchEndTimer = 0;
-let tournamentRound = 0;
-let tournamentOpponents = [];
-let flashTimer = 0;
-let shakeTimer = 0;
-let shakeX = 0;
-let shakeY = 0;
-let titleAnim = 0;
-let p1MoveSelect = 0;
+let state = STATES.TITLE, selectedWrestler = 0, cursorPos = 0;
+let p1Wrestler = null, p2Wrestler = null;
+let p1Score = 0, p2Score = 0, p1Stamina = 100, p2Stamina = 100;
+let period = 1, moveClock = 30, moveClockTimer = 0;
+let p1Move = null, p2Move = null;
+let animTimer = 0, animPhase = '', resultText = '', resultTimer = 0;
+let versusTimer = 0, matchIntroTimer = 0, periodEndTimer = 0, matchEndTimer = 0;
+let tournamentRound = 0, tournamentOpponents = [];
+let flashTimer = 0, shakeTimer = 0, shakeX = 0, shakeY = 0;
+let titleAnim = 0, p1MoveSelect = 0, takedownAnim = 0;
 let stars = [];
-let matWrestlerY = 0; // animation offset
-let takedownAnim = 0;
+for (let i = 0; i < 50; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 2 + 0.5, b: Math.random() });
+let selectScroll = 0;
 
-// Tournament mode
-let tournamentMode = false;
+// Draw helpers
+function txt(text, x, y, color=C.WHITE, size=1) { ctx.fillStyle = color; ctx.font = `${8*size}px monospace`; ctx.textAlign = 'center'; ctx.fillText(text, x, y); }
+function txtL(text, x, y, color=C.WHITE, size=1) { ctx.fillStyle = color; ctx.font = `${8*size}px monospace`; ctx.textAlign = 'left'; ctx.fillText(text, x, y); }
+function txtR(text, x, y, color=C.WHITE, size=1) { ctx.fillStyle = color; ctx.font = `${8*size}px monospace`; ctx.textAlign = 'right'; ctx.fillText(text, x, y); }
+function rect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.floor(x), Math.floor(y), w, h); }
+function outline(x, y, w, h, c) { ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, w, h); }
 
-// Generate stars for title
-for (let i = 0; i < 40; i++) {
-  stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 2 + 0.5, b: Math.random() });
-}
-
-// ============================================================
-// DRAW HELPERS
-// ============================================================
-function drawPixelText(text, x, y, color=C.WHITE, size=1) {
-  ctx.fillStyle = color;
-  ctx.font = `${8*size}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(text, x, y);
-}
-
-function drawPixelTextLeft(text, x, y, color=C.WHITE, size=1) {
-  ctx.fillStyle = color;
-  ctx.font = `${8*size}px monospace`;
-  ctx.textAlign = 'left';
-  ctx.fillText(text, x, y);
-}
-
-function drawPixelTextRight(text, x, y, color=C.WHITE, size=1) {
-  ctx.fillStyle = color;
-  ctx.font = `${8*size}px monospace`;
-  ctx.textAlign = 'right';
-  ctx.fillText(text, x, y);
-}
-
-function drawRect(x, y, w, h, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
-}
-
-function drawOutline(x, y, w, h, color) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(Math.floor(x)+0.5, Math.floor(y)+0.5, w, h);
-}
-
-function drawStatBar(x, y, w, val, maxVal, color) {
-  drawRect(x, y, w, 4, C.DARK_GRAY);
-  const fillW = Math.floor((val / maxVal) * w);
-  drawRect(x, y, fillW, 4, color);
-}
-
-// ============================================================
-// DRAW WRESTLER SPRITE (simple pixel characters)
-// ============================================================
-function drawWrestlerSprite(x, y, wrestler, facing=1, frame=0, scale=2) {
-  const c1 = wrestler.color;
-  const c2 = wrestler.color2;
-  const s = scale;
-  const f = facing;
-
-  // Body
-  drawRect(x - 4*s, y - 6*s, 8*s, 6*s, c1);  // torso
-  drawRect(x - 3*s, y - 8*s, 6*s, 3*s, C.SKIN); // head
-  drawRect(x - 2*s, y - 8*s, 4*s, 1*s, c2);    // headgear
-  
-  // Eyes
-  if (f === 1) {
-    drawRect(x, y - 7*s, 1*s, 1*s, C.BLACK);
-  } else {
-    drawRect(x - 1*s, y - 7*s, 1*s, 1*s, C.BLACK);
-  }
-  
-  // Legs
-  const legOff = Math.floor(Math.sin(frame * 0.3) * 2);
-  drawRect(x - 3*s, y, 2*s, 5*s + legOff, c2);  // left leg
-  drawRect(x + 1*s, y, 2*s, 5*s - legOff, c2);   // right leg
-  
+// Draw wrestler sprite — more wrestling-like
+function drawWrestler(x, y, w, facing=1, frame=0, sc=2) {
+  const c1 = w.singlet || w.color;
+  const c2 = w.color2;
+  const s = sc;
+  // Head
+  rect(x - 3*s, y - 12*s, 6*s, 5*s, C.SKIN);
+  // Headgear
+  rect(x - 4*s, y - 12*s, 2*s, 4*s, c1);
+  rect(x + 2*s, y - 12*s, 2*s, 4*s, c1);
+  rect(x - 3*s, y - 13*s, 6*s, 2*s, c1);
+  // Eye
+  rect(x + (facing===1 ? 1 : -2)*s, y - 10*s, 1*s, 1*s, C.BLACK);
+  // Neck
+  rect(x - 1*s, y - 7*s, 2*s, 1*s, C.SKIN);
+  // Torso (singlet)
+  rect(x - 5*s, y - 6*s, 10*s, 8*s, c1);
+  // Singlet stripe
+  rect(x - 1*s, y - 6*s, 2*s, 8*s, c2);
   // Arms
-  const armOff = Math.floor(Math.sin(frame * 0.3 + 1) * 2);
-  drawRect(x - 6*s, y - 5*s, 2*s, 4*s + armOff, C.SKIN);  // left arm
-  drawRect(x + 4*s, y - 5*s, 2*s, 4*s - armOff, C.SKIN);   // right arm
-  
-  // Shoes
-  drawRect(x - 3*s, y + 5*s + legOff, 3*s, 1*s, C.BLACK);
-  drawRect(x + 1*s, y + 5*s - legOff, 3*s, 1*s, C.BLACK);
+  const ao = Math.floor(Math.sin(frame * 0.3 + 1) * 2);
+  rect(x - 7*s, y - 5*s, 2*s, 5*s + ao, C.SKIN);
+  rect(x + 5*s, y - 5*s, 2*s, 5*s - ao, C.SKIN);
+  // Legs
+  const lo = Math.floor(Math.sin(frame * 0.3) * 2);
+  rect(x - 4*s, y + 2*s, 3*s, 5*s + lo, c2);
+  rect(x + 1*s, y + 2*s, 3*s, 5*s - lo, c2);
+  // Wrestling shoes
+  rect(x - 4*s, y + 7*s + lo, 4*s, 2*s, C.WHITE);
+  rect(x + 1*s, y + 7*s - lo, 4*s, 2*s, C.WHITE);
+  rect(x - 4*s, y + 7*s + lo, 4*s, 1*s, c1);
+  rect(x + 1*s, y + 7*s - lo, 4*s, 1*s, c1);
 }
 
-function drawWrestlerDown(x, y, wrestler, facing=1, scale=2) {
-  const c1 = wrestler.color;
-  const c2 = wrestler.color2;
-  const s = scale;
-  
-  // Lying flat
-  drawRect(x - 6*s, y - 2*s, 12*s, 4*s, c1);  // torso horizontal
-  drawRect(x + 6*s * facing - 3*s, y - 3*s, 3*s, 3*s, C.SKIN); // head
-  drawRect(x + 6*s * facing - 2*s, y - 3*s, 2*s, 1*s, c2);     // headgear
-  drawRect(x - 6*s, y + 2*s, 3*s, 2*s, c2);   // legs
-  drawRect(x - 6*s, y - 4*s, 2*s, 2*s, C.SKIN); // arm
+function drawWrestlerDown(x, y, w, facing=1, sc=2) {
+  const c1 = w.singlet || w.color, c2 = w.color2, s = sc;
+  rect(x - 8*s, y - 2*s, 16*s, 5*s, c1);
+  rect(x + 8*s * facing - 4*s, y - 4*s, 4*s, 4*s, C.SKIN);
+  rect(x + 8*s * facing - 3*s, y - 4*s, 3*s, 2*s, c1);
+  rect(x - 8*s, y + 3*s, 4*s, 3*s, c2);
+  rect(x - 8*s, y + 5*s, 4*s, 1*s, C.WHITE);
+  rect(x - 10*s, y - 4*s, 3*s, 3*s, C.SKIN);
 }
 
-// ============================================================
+// Draw competition mat
+function drawMat() {
+  // Mat base - blue competition mat
+  rect(0, 60, W, H - 60, C.MAT_BLUE);
+  
+  // 10m circle
+  ctx.beginPath();
+  ctx.arc(W/2, H/2 + 30, 130, 0, Math.PI * 2);
+  ctx.strokeStyle = C.WHITE;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(W/2, H/2 + 30, 100, 0, Math.PI * 2);
+  ctx.strokeStyle = C.MAT_RED;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  
+  // Center circle
+  ctx.beginPath();
+  ctx.arc(W/2, H/2 + 30, 20, 0, Math.PI * 2);
+  ctx.strokeStyle = C.WHITE;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(W/2, H/2 + 30, 3, 0, Math.PI * 2);
+  ctx.fillStyle = C.WHITE;
+  ctx.fill();
+  
+  // Red zone corner indicators
+  rect(10, 65, 30, 20, C.MAT_RED);
+  txt('RED', 25, 79, C.WHITE, 1);
+  rect(W - 40, 65, 30, 20, C.MAT_RED);
+  txt('BLU', W - 25, 79, C.WHITE, 1);
+  
+  // Boundary line
+  outline(4, 64, W - 8, H - 68, C.WHITE);
+}
+
+// Scoreboard
+function drawScoreboard() {
+  rect(0, 0, W, 58, C.BLACK);
+  outline(0, 0, W, 58, C.GOLD);
+  
+  // P1
+  txtL(p1Wrestler.name, 8, 16, p1Wrestler.color, 1);
+  txtL('' + p1Score, 8, 36, C.WHITE, 2);
+  // Stamina bar
+  rect(8, 44, 120, 6, C.DARK_GRAY);
+  rect(8, 44, Math.floor(p1Stamina * 1.2), 6, p1Wrestler.color);
+  txtL('STA', 8, 56, C.GRAY, 1);
+  
+  // Clock
+  txt('P' + period, W/2, 16, C.GOLD, 1);
+  txt('' + moveClock, W/2, 40, C.YELLOW, 3);
+  
+  // P2
+  txtR(p2Wrestler.name, W - 8, 16, p2Wrestler.color, 1);
+  txtR('' + p2Score, W - 8, 36, C.WHITE, 2);
+  rect(W - 128, 44, 120, 6, C.DARK_GRAY);
+  const p2Fill = Math.floor(p2Stamina * 1.2);
+  rect(W - 128, 44, 120, 6, C.DARK_GRAY);
+  rect(W - 8 - p2Fill, 44, p2Fill, 6, p2Wrestler.color);
+  txtR('STA', W - 8, 56, C.GRAY, 1);
+  
+  // Round
+  txt('R' + (tournamentRound + 1), W/2, 56, C.GRAY, 1);
+}
+
 // TITLE SCREEN
-// ============================================================
 function updateTitle() {
   titleAnim++;
-  if (keys['Enter'] || keys['Space']) {
-    initAudio();
-    sfxSelect();
-    state = STATES.SELECT;
-    cursorPos = 0;
-    keys['Enter'] = false;
-    keys['Space'] = false;
+  const t = consumeTouch();
+  if (t === 'start' || keys['Enter'] || keys['Space']) {
+    initAudio(); sfxSelect(); state = STATES.SELECT; cursorPos = 0;
+    keys['Enter'] = false; keys['Space'] = false;
   }
 }
 
 function drawTitle() {
-  // Background
-  drawRect(0, 0, W, H, C.BLACK);
+  rect(0, 0, W, H, C.BLACK);
+  touchAreas = [];
   
-  // Animated stars
+  // Stars
   stars.forEach(s => {
     s.b += 0.02;
-    const bright = Math.sin(s.b) * 0.5 + 0.5;
-    if (bright > 0.3) {
-      drawRect(s.x, s.y, s.s, s.s, bright > 0.7 ? C.YELLOW : C.LIGHT_GRAY);
-    }
+    const br = Math.sin(s.b) * 0.5 + 0.5;
+    if (br > 0.3) rect(s.x, s.y, s.s, s.s, br > 0.7 ? C.GOLD : C.LIGHT_GRAY);
   });
   
-  // Mat pattern at bottom
-  for (let x = 0; x < W; x += 16) {
-    drawRect(x, 180, 16, 60, (x/16) % 2 === 0 ? C.MAT_GREEN : C.MAT_GREEN2);
+  // USA stripes at top
+  for (let i = 0; i < 7; i++) {
+    rect(0, 80 + i * 8, W, 4, i % 2 === 0 ? C.RED : C.WHITE);
   }
-  drawOutline(0, 180, W, 60, C.BRIGHT_GREEN);
+  // Blue field
+  rect(0, 80, 80, 56, C.NAVY);
+  // Stars in blue field
+  txt('*', 20, 100, C.WHITE, 1);
+  txt('*', 40, 100, C.WHITE, 1);
+  txt('*', 60, 100, C.WHITE, 1);
+  txt('*', 20, 115, C.WHITE, 1);
+  txt('*', 40, 115, C.WHITE, 1);
+  txt('*', 60, 115, C.WHITE, 1);
+  txt('*', 30, 108, C.WHITE, 1);
+  txt('*', 50, 108, C.WHITE, 1);
   
-  // Wrestling circle on mat
-  ctx.beginPath();
-  ctx.arc(W/2, 210, 25, 0, Math.PI * 2);
-  ctx.strokeStyle = C.BRIGHT_GREEN;
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // Wrestling mat at bottom
+  rect(20, 420, W - 40, 180, C.MAT_BLUE);
+  ctx.beginPath(); ctx.arc(W/2, 510, 70, 0, Math.PI * 2); ctx.strokeStyle = C.WHITE; ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2, 510, 55, 0, Math.PI * 2); ctx.strokeStyle = C.MAT_RED; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2, 510, 12, 0, Math.PI * 2); ctx.strokeStyle = C.WHITE; ctx.lineWidth = 1; ctx.stroke();
+  outline(20, 420, W - 40, 180, C.WHITE);
   
-  // Two tiny wrestlers on mat
-  drawWrestlerSprite(W/2 - 15, 205, WRESTLERS[0], 1, titleAnim, 1);
-  drawWrestlerSprite(W/2 + 15, 205, WRESTLERS[1], -1, titleAnim, 1);
+  // Tiny wrestlers
+  drawWrestler(W/2 - 25, 500, WRESTLERS[0], 1, titleAnim, 1);
+  drawWrestler(W/2 + 25, 500, WRESTLERS[1], -1, titleAnim, 1);
   
   // Title
-  const yOff = Math.sin(titleAnim * 0.05) * 3;
+  const yOff = Math.sin(titleAnim * 0.05) * 4;
+  txt('MAT', W/2, 220 + yOff, C.GOLD, 6);
+  txt('KINGS', W/2, 290 + yOff, C.BRIGHT_RED, 6);
   
-  // Shadow
-  drawPixelText('MAT', W/2 + 2, 52 + yOff, C.DARK_GRAY, 4);
-  drawPixelText('KINGS', W/2 + 2, 92 + yOff, C.DARK_GRAY, 4);
-  
-  // Main title
-  drawPixelText('MAT', W/2, 50 + yOff, C.GOLD, 4);
-  drawPixelText('KINGS', W/2, 90 + yOff, C.BRIGHT_RED, 4);
+  // Wrestling silhouette icons
+  txt('🤼', W/2 - 60, 260, C.WHITE, 2);
+  txt('🤼', W/2 + 60, 260, C.WHITE, 2);
   
   // Subtitle
-  drawPixelText('ARCADE WRESTLING', W/2, 115, C.LIGHT_GRAY, 1);
+  txt('USA WRESTLING ARCADE', W/2, 330, C.WHITE, 1);
+  txt('TECMO BOWL STYLE', W/2, 345, C.GRAY, 1);
   
-  // Flashing press start
-  if (Math.floor(titleAnim / 30) % 2 === 0) {
-    drawPixelText('PRESS ENTER', W/2, 155, C.YELLOW, 1);
+  // Start button
+  const by = 380;
+  if (Math.floor(titleAnim / 25) % 2 === 0) {
+    rect(W/2 - 80, by - 14, 160, 28, C.GOLD);
+    txt('TAP TO START', W/2, by + 4, C.BLACK, 2);
+  } else {
+    outline(W/2 - 80, by - 14, 160, 28, C.GOLD);
+    txt('TAP TO START', W/2, by + 4, C.GOLD, 2);
   }
+  addTouch('start', W/2 - 80, by - 14, 160, 28);
   
   // Credits
-  drawPixelText('BUILT BY ANVIL', W/2, H - 12, C.GRAY, 1);
+  txt('BUILT BY ANVIL', W/2, H - 12, C.GRAY, 1);
 }
 
-// ============================================================
 // CHARACTER SELECT
-// ============================================================
 function updateSelect() {
-  if (keys['ArrowUp'] || keys['KeyW']) { cursorPos = (cursorPos - 1 + WRESTLERS.length) % WRESTLERS.length; sfxSelect(); keys['ArrowUp'] = false; keys['KeyW'] = false; }
-  if (keys['ArrowDown'] || keys['KeyS']) { cursorPos = (cursorPos + 1) % WRESTLERS.length; sfxSelect(); keys['ArrowDown'] = false; keys['KeyS'] = false; }
-  if (keys['Enter'] || keys['Space']) {
+  titleAnim++;
+  const t = consumeTouch();
+  if (t && t.startsWith('w')) {
+    const idx = parseInt(t.substring(1));
+    cursorPos = idx;
+    sfxSelect();
+  }
+  if (t === 'confirm' || keys['Enter'] || keys['Space']) {
     sfxSelect();
     p1Wrestler = WRESTLERS[cursorPos];
-    selectedWrestler = cursorPos;
-    
-    // Set up tournament
     tournamentOpponents = WRESTLERS.filter((_, i) => i !== cursorPos).sort(() => Math.random() - 0.5);
     tournamentRound = 0;
     p2Wrestler = tournamentOpponents[0];
-    
-    // Reset match
     p1Score = 0; p2Score = 0; p1Stamina = 100; p2Stamina = 100;
     period = 1; moveClock = 30;
-    
-    state = STATES.VERSUS;
-    versusTimer = 120;
+    state = STATES.VERSUS; versusTimer = 120;
     keys['Enter'] = false; keys['Space'] = false;
   }
+  if (keys['ArrowUp'] || keys['KeyW']) { cursorPos = (cursorPos - 1 + WRESTLERS.length) % WRESTLERS.length; sfxSelect(); keys['ArrowUp'] = false; keys['KeyW'] = false; }
+  if (keys['ArrowDown'] || keys['KeyS']) { cursorPos = (cursorPos + 1) % WRESTLERS.length; sfxSelect(); keys['ArrowDown'] = false; keys['KeyS'] = false; }
 }
 
 function drawSelect() {
-  drawRect(0, 0, W, H, C.BLACK);
+  rect(0, 0, W, H, C.BLACK);
+  touchAreas = [];
   
-  drawPixelText('SELECT YOUR WRESTLER', W/2, 16, C.GOLD, 1);
+  // Header
+  rect(0, 0, W, 40, C.NAVY);
+  outline(0, 0, W, 40, C.GOLD);
+  txt('SELECT YOUR WRESTLER', W/2, 26, C.GOLD, 2);
   
+  // Wrestler list
   WRESTLERS.forEach((w, i) => {
-    const y = 32 + i * 30;
-    const selected = i === cursorPos;
+    const y = 50 + i * 75;
+    const sel = i === cursorPos;
     
-    // Highlight box
-    if (selected) {
-      drawRect(16, y - 4, W - 32, 26, w.color2);
-      drawOutline(16, y - 4, W - 32, 26, w.color);
+    if (sel) {
+      rect(10, y, W - 20, 68, w.color2);
+      outline(10, y, W - 20, 68, w.color);
+    } else {
+      rect(10, y, W - 20, 68, C.DARK_GRAY);
+      outline(10, y, W - 20, 68, C.GRAY);
     }
     
-    // Name and school
-    drawPixelTextLeft(w.name, 24, y + 8, selected ? C.WHITE : C.LIGHT_GRAY, 1);
-    drawPixelTextRight(w.school, W - 24, y + 2, C.GRAY, 1);
+    // Wrestler sprite
+    drawWrestler(50, y + 38, w, 1, titleAnim, 1);
+    
+    // Name
+    txtL(w.name, 80, y + 16, sel ? C.WHITE : C.LIGHT_GRAY, 2);
+    txtL(w.school + ', ' + w.state, 80, y + 30, C.GRAY, 1);
     
     // Stats
-    const sx = W - 24;
-    drawPixelTextRight(`STR:${w.str} SPD:${w.spd} TEC:${w.tec}`, sx, y + 16, C.GRAY, 1);
+    const sx = 80;
+    txtL('STR', sx, y + 44, C.BRIGHT_RED, 1); rect(sx + 24, y + 38, 40, 5, C.DARK_GRAY); rect(sx + 24, y + 38, w.str * 4, 5, C.BRIGHT_RED);
+    txtL('SPD', sx + 70, y + 44, C.BRIGHT_BLUE, 1); rect(sx + 94, y + 38, 40, 5, C.DARK_GRAY); rect(sx + 94, y + 38, w.spd * 4, 5, C.BRIGHT_BLUE);
+    txtL('TEC', sx + 140, y + 44, C.BRIGHT_GREEN, 1); rect(sx + 164, y + 38, 40, 5, C.DARK_GRAY); rect(sx + 164, y + 38, w.tec * 4, 5, C.BRIGHT_GREEN);
+    txtL('STA', sx, y + 56, C.YELLOW, 1); rect(sx + 24, y + 50, 40, 5, C.DARK_GRAY); rect(sx + 24, y + 50, w.sta * 4, 5, C.YELLOW);
     
-    // Mini wrestler
-    drawWrestlerSprite(12, y + 6, w, 1, 0, 1);
+    // Moves
+    txtL(w.moves.map(m => m.icon).join(' '), sx + 70, y + 56, C.LIGHT_GRAY, 1);
+    
+    addTouch('w' + i, 10, y, W - 20, 68);
   });
   
-  // Preview of selected wrestler
-  if (WRESTLERS[cursorPos]) {
-    const w = WRESTLERS[cursorPos];
-    drawWrestlerSprite(W/2, H - 30, w, 1, titleAnim++, 2);
-  }
-  
-  drawPixelText('ENTER TO SELECT', W/2, H - 8, C.YELLOW, 1);
+  // Confirm button
+  const by = H - 50;
+  rect(W/2 - 90, by, 180, 40, C.GOLD);
+  txt('TAP TO SELECT', W/2, by + 25, C.BLACK, 2);
+  addTouch('confirm', W/2 - 90, by, 180, 40);
 }
 
-// ============================================================
-// VERSUS SCREEN
-// ============================================================
+// VERSUS
 function updateVersus() {
   versusTimer--;
-  if (versusTimer <= 0) {
-    state = STATES.MATCH_INTRO;
-    matchIntroTimer = 90;
-    sfxWhistle();
-  }
+  titleAnim++;
+  if (versusTimer <= 0) { state = STATES.MATCH_INTRO; matchIntroTimer = 90; sfxWhistle(); }
 }
 
 function drawVersus() {
-  drawRect(0, 0, W, H, C.BLACK);
+  rect(0, 0, W, H, C.BLACK);
+  touchAreas = [];
   
-  // VS flash
-  const flash = versusTimer > 60;
-  
-  // P1 side
-  drawPixelText(p1Wrestler.name, 80, 50, p1Wrestler.color, 2);
-  drawWrestlerSprite(80, 110, p1Wrestler, 1, titleAnim++, 2);
-  drawPixelText(p1Wrestler.school, 80, 135, C.LIGHT_GRAY, 1);
-  
-  // P2 side
-  drawPixelText(p2Wrestler.name, W - 80, 50, p2Wrestler.color, 2);
-  drawWrestlerSprite(W - 80, 110, p2Wrestler, -1, titleAnim++, 2);
-  drawPixelText(p2Wrestler.school, W - 80, 135, C.LIGHT_GRAY, 1);
+  // P1
+  drawWrestler(W/2, 200, p1Wrestler, 1, titleAnim, 3);
+  txt(p1Wrestler.name, W/2, 140, p1Wrestler.color, 2);
+  txt(p1Wrestler.school + ', ' + p1Wrestler.state, W/2, 160, C.LIGHT_GRAY, 1);
   
   // VS
-  if (flash || Math.floor(versusTimer / 5) % 2 === 0) {
-    drawPixelText('VS', W/2, 90, C.YELLOW, 3);
-  }
+  const flash = versusTimer > 60 || Math.floor(versusTimer / 5) % 2 === 0;
+  if (flash) txt('VS', W/2, 290, C.GOLD, 4);
   
-  // Round info
-  drawPixelText(`ROUND ${tournamentRound + 1}`, W/2, 165, C.GOLD, 1);
+  // P2
+  drawWrestler(W/2, 430, p2Wrestler, -1, titleAnim, 3);
+  txt(p2Wrestler.name, W/2, 370, p2Wrestler.color, 2);
+  txt(p2Wrestler.school + ', ' + p2Wrestler.state, W/2, 390, C.LIGHT_GRAY, 1);
+  
+  // Round
+  txt('ROUND ' + (tournamentRound + 1), W/2, 550, C.GOLD, 2);
+  
+  // USA stripe bar
+  for (let i = 0; i < W; i += 20) {
+    rect(i, 510, 10, 8, C.RED);
+    rect(i + 10, 510, 10, 8, C.WHITE);
+  }
+  rect(W/2 - 40, 510, 80, 8, C.NAVY);
 }
 
-// ============================================================
 // MATCH INTRO
-// ============================================================
 function updateMatchIntro() {
   matchIntroTimer--;
-  if (matchIntroTimer <= 0) {
-    state = STATES.MOVE_SELECT;
-    p1MoveSelect = 0;
-    moveClock = 30;
-    moveClockTimer = 0;
-  }
+  if (matchIntroTimer <= 0) { state = STATES.MOVE_SELECT; p1MoveSelect = 0; moveClock = 30; moveClockTimer = 0; }
 }
 
 function drawMatchIntro() {
-  drawMatch();
-  
-  // Overlay
-  drawRect(0, 0, W, H, 'rgba(0,0,0,0.6)');
-  
-  const t = matchIntroTimer;
-  if (t > 60) {
-    drawPixelText('PERIOD ' + period, W/2, 100, C.GOLD, 2);
-  } else if (t > 30) {
-    drawPixelText('WRESTLE!', W/2, 100, C.BRIGHT_RED, 3);
+  drawMatchBG();
+  rect(0, 0, W, H, 'rgba(0,0,0,0.6)');
+  touchAreas = [];
+  if (matchIntroTimer > 60) {
+    txt('PERIOD ' + period, W/2, H/2, C.GOLD, 3);
+  } else {
+    txt('WRESTLE!', W/2, H/2, C.BRIGHT_RED, 4);
   }
 }
 
-// ============================================================
-// MATCH SCREEN (background)
-// ============================================================
-function drawMatch() {
-  // Mat
-  for (let x = 0; x < W; x += 32) {
-    for (let y = 30; y < H; y += 32) {
-      const shade = ((x/32 + y/32) % 2 === 0) ? C.MAT_GREEN : C.MAT_GREEN2;
-      drawRect(x, y, 32, 32, shade);
-    }
-  }
-  
-  // Mat outline
-  drawOutline(0, 30, W, H - 30, C.BRIGHT_GREEN);
-  
-  // Center circle
-  ctx.beginPath();
-  ctx.arc(W/2, H/2 + 15, 40, 0, Math.PI * 2);
-  ctx.strokeStyle = C.BRIGHT_GREEN;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  
-  // Scoreboard
-  drawRect(0, 0, W, 30, C.BLACK);
-  
-  // P1 info
-  drawPixelTextLeft(p1Wrestler.name, 4, 12, p1Wrestler.color, 1);
-  drawPixelTextLeft(`${p1Score}`, 4, 24, C.WHITE, 1);
-  drawStatBar(70, 6, 60, p1Stamina, 100, p1Wrestler.color);
-  
-  // P2 info
-  drawPixelTextRight(p2Wrestler.name, W - 4, 12, p2Wrestler.color, 1);
-  drawPixelTextRight(`${p2Score}`, W - 4, 24, C.WHITE, 1);
-  drawStatBar(W - 130, 6, 60, p2Stamina, 100, p2Wrestler.color);
-  
-  // Clock
-  drawPixelText(`${moveClock}`, W/2, 22, C.YELLOW, 2);
-  drawPixelText(`P${period}`, W/2, 10, C.LIGHT_GRAY, 1);
-  
-  // Round indicator
-  drawPixelText(`R${tournamentRound + 1}`, W/2, H - 4, C.GRAY, 1);
+function drawMatchBG() {
+  drawMat();
+  drawScoreboard();
 }
 
-// ============================================================
 // MOVE SELECT
-// ============================================================
 function updateMoveSelect() {
+  titleAnim++;
+  const t = consumeTouch();
+  if (t && t.startsWith('move')) {
+    p1MoveSelect = parseInt(t.substring(4));
+    sfxSelect();
+    resolveMove(p1MoveSelect);
+    return;
+  }
   if (keys['ArrowUp'] || keys['KeyW']) { p1MoveSelect = (p1MoveSelect - 1 + 4) % 4; sfxSelect(); keys['ArrowUp'] = false; keys['KeyW'] = false; }
   if (keys['ArrowDown'] || keys['KeyS']) { p1MoveSelect = (p1MoveSelect + 1) % 4; sfxSelect(); keys['ArrowDown'] = false; keys['KeyS'] = false; }
   
-  // Clock ticks
   moveClockTimer++;
   if (moveClockTimer >= 60) {
-    moveClockTimer = 0;
-    moveClock--;
-    if (moveClock <= 0) {
-      // Time's up - random move
-      resolveMove(p1MoveSelect);
-      return;
-    }
+    moveClockTimer = 0; moveClock--;
+    if (moveClock <= 0) { resolveMove(p1MoveSelect); return; }
   }
-  
-  if (keys['Enter'] || keys['Space']) {
-    resolveMove(p1MoveSelect);
-    keys['Enter'] = false; keys['Space'] = false;
-  }
+  if (keys['Enter'] || keys['Space']) { resolveMove(p1MoveSelect); keys['Enter'] = false; keys['Space'] = false; }
 }
 
 function resolveMove(p1Idx) {
   p1Move = p1Wrestler.moves[p1Idx];
-  
-  // AI picks move
   const aiIdx = Math.floor(Math.random() * 4);
   p2Move = p2Wrestler.moves[aiIdx];
-  
-  state = STATES.MOVE_ANIM;
-  animTimer = 60;
-  animPhase = 'clash';
-  takedownAnim = 0;
+  state = STATES.MOVE_ANIM; animTimer = 60; animPhase = 'clash'; takedownAnim = 0;
 }
 
 function updateMoveAnim() {
   animTimer--;
-  
   if (animPhase === 'clash') {
-    // Shaking / tension
-    shakeTimer = 3;
-    shakeX = (Math.random() - 0.5) * 4;
-    shakeY = (Math.random() - 0.5) * 4;
-    
+    shakeTimer = 3; shakeX = (Math.random() - 0.5) * 4; shakeY = (Math.random() - 0.5) * 4;
     if (animTimer <= 0) {
-      animPhase = 'execute';
-      animTimer = 45;
-      takedownAnim = 0;
-      
-      // Determine outcome
+      animPhase = 'execute'; animTimer = 45; takedownAnim = 0;
       const outcome = resolveOutcome(p1Move, p2Move, p1Wrestler, p2Wrestler);
       resultText = outcome.text;
-      // Apply result
-      if (outcome.winner === 'p1') {
-        p1Score += outcome.points;
-        p2Stamina = Math.max(0, p2Stamina - outcome.damage);
-        sfxTakedown();
-      } else if (outcome.winner === 'p2') {
-        p2Score += outcome.points;
-        p1Stamina = Math.max(0, p1Stamina - outcome.damage);
-        sfxHit();
-      } else {
-        sfxEscape();
-      }
+      if (outcome.winner === 'p1') { p1Score += outcome.points; p2Stamina = Math.max(0, p2Stamina - outcome.damage); sfxTakedown(); }
+      else if (outcome.winner === 'p2') { p2Score += outcome.points; p1Stamina = Math.max(0, p1Stamina - outcome.damage); sfxHit(); }
+      else { sfxEscape(); }
     }
   } else if (animPhase === 'execute') {
     takedownAnim++;
-    
-    if (animTimer <= 0) {
-      animPhase = 'result';
-      animTimer = 60;
-      resultTimer = 60;
-    }
+    if (animTimer <= 0) { animPhase = 'result'; animTimer = 60; resultTimer = 60; }
   } else if (animPhase === 'result') {
     if (animTimer <= 0) {
-      // Check for pin / KO
       if (p1Stamina <= 0 || p2Stamina <= 0) {
-        // Pin!
         sfxPin();
-        if (p2Stamina <= 0) {
-          p1Score += 6;
-          resultText = 'PIN! ' + p1Wrestler.name + ' WINS!';
-        } else {
-          p2Score += 6;
-          resultText = 'PIN! ' + p2Wrestler.name + ' WINS!';
-        }
-        state = STATES.MATCH_END;
-        matchEndTimer = 150;
-        return;
+        if (p2Stamina <= 0) { p1Score += 6; resultText = 'FALL! ' + p1Wrestler.name + ' PINS!'; }
+        else { p2Score += 6; resultText = 'FALL! ' + p2Wrestler.name + ' PINS!'; }
+        state = STATES.MATCH_END; matchEndTimer = 150; return;
       }
-      
-      // Check period end
-      if (moveClock <= 0) {
-        state = STATES.PERIOD_END;
-        periodEndTimer = 90;
-        return;
-      }
-      
-      state = STATES.MOVE_SELECT;
-      p1MoveSelect = 0;
+      if (moveClock <= 0) { state = STATES.PERIOD_END; periodEndTimer = 90; return; }
+      state = STATES.MOVE_SELECT; p1MoveSelect = 0;
     }
   }
 }
 
 function resolveOutcome(m1, m2, w1, w2) {
-  // Type matchups (Tecmo Bowl style)
-  // defense beats takedown
-  // takedown beats throw  
-  // throw beats pin
-  // pin beats defense (catches them off guard)
+  let adv = 0;
+  if (m1.type === 'defense' && m2.type === 'takedown') adv = 2;
+  else if (m1.type === 'takedown' && m2.type === 'defense') adv = -2;
+  else if (m1.type === 'takedown' && m2.type === 'throw') adv = 2;
+  else if (m1.type === 'throw' && m2.type === 'takedown') adv = -2;
+  else if (m1.type === 'throw' && m2.type === 'pin') adv = 2;
+  else if (m1.type === 'pin' && m2.type === 'throw') adv = -2;
+  else if (m1.type === 'pin' && m2.type === 'defense') adv = 2;
+  else if (m1.type === 'defense' && m2.type === 'pin') adv = -2;
   
-  let p1Advantage = 0;
+  if (m1.type === 'takedown') adv += (w1.str - w2.spd) * 0.3;
+  else if (m1.type === 'throw') adv += (w1.tec - w2.str) * 0.3;
+  else if (m1.type === 'pin') adv += (w1.tec - w2.spd) * 0.3;
+  else if (m1.type === 'defense') adv += (w1.spd - w2.str) * 0.3;
   
-  if (m1.type === 'defense' && m2.type === 'takedown') p1Advantage = 2;
-  else if (m1.type === 'takedown' && m2.type === 'defense') p1Advantage = -2;
-  else if (m1.type === 'takedown' && m2.type === 'throw') p1Advantage = 2;
-  else if (m1.type === 'throw' && m2.type === 'takedown') p1Advantage = -2;
-  else if (m1.type === 'throw' && m2.type === 'pin') p1Advantage = 2;
-  else if (m1.type === 'pin' && m2.type === 'throw') p1Advantage = -2;
-  else if (m1.type === 'pin' && m2.type === 'defense') p1Advantage = 2;
-  else if (m1.type === 'defense' && m2.type === 'pin') p1Advantage = -2;
-  else p1Advantage = 0; // same type = neutral
+  adv += (m1.power - m2.power) * 0.2;
+  adv += (Math.random() - 0.5) * 2;
+  adv += (p1Stamina - p2Stamina) * 0.02;
   
-  // Add stat differences and move power
-  if (m1.type === 'takedown') p1Advantage += (w1.str - w2.spd) * 0.3;
-  else if (m1.type === 'throw') p1Advantage += (w1.tec - w2.str) * 0.3;
-  else if (m1.type === 'pin') p1Advantage += (w1.tec - w2.spd) * 0.3;
-  else if (m1.type === 'defense') p1Advantage += (w1.spd - w2.str) * 0.3;
-  
-  p1Advantage += (m1.power - m2.power) * 0.2;
-  p1Advantage += (Math.random() - 0.5) * 2; // variance
-  
-  // Stamina factor
-  p1Advantage += (p1Stamina - p2Stamina) * 0.02;
-  
-  if (p1Advantage > 1.5) {
-    return { winner: 'p1', points: 2, damage: 15, text: m1.name + '!' };
-  } else if (p1Advantage > 0.5) {
-    return { winner: 'p1', points: 1, damage: 8, text: m1.name + ' - partial!' };
-  } else if (p1Advantage > -0.5) {
-    return { winner: 'none', points: 0, damage: 0, text: 'STALEMATE!' };
-  } else if (p1Advantage > -1.5) {
-    return { winner: 'p2', points: 1, damage: 8, text: m2.name + ' - partial!' };
-  } else {
-    return { winner: 'p2', points: 2, damage: 15, text: m2.name + '!' };
-  }
+  if (adv > 1.5) return { winner: 'p1', points: m1.pts, damage: 15, text: m1.name + '!' };
+  if (adv > 0.5) return { winner: 'p1', points: 1, damage: 8, text: m1.name + ' - partial!' };
+  if (adv > -0.5) return { winner: 'none', points: 0, damage: 0, text: 'STALEMATE!' };
+  if (adv > -1.5) return { winner: 'p2', points: 1, damage: 8, text: m2.name + ' - partial!' };
+  return { winner: 'p2', points: m2.pts, damage: 15, text: m2.name + '!' };
 }
 
 function drawMoveSelect() {
-  drawMatch();
+  drawMatchBG();
+  touchAreas = [];
   
   // Wrestlers on mat
-  drawWrestlerSprite(W/2 - 30, H/2 + 10, p1Wrestler, 1, titleAnim++, 2);
-  drawWrestlerSprite(W/2 + 30, H/2 + 10, p2Wrestler, -1, titleAnim++, 2);
+  drawWrestler(W/2 - 40, H/2 + 10, p1Wrestler, 1, titleAnim, 2);
+  drawWrestler(W/2 + 40, H/2 + 10, p2Wrestler, -1, titleAnim, 2);
   
-  // Move selection panel at bottom
-  drawRect(0, H - 52, W, 52, C.BLACK);
-  drawOutline(0, H - 52, W, 52, C.GOLD);
+  // Move selection panel
+  rect(0, H - 140, W, 140, C.BLACK);
+  outline(0, H - 140, W, 140, C.GOLD);
+  txt('PICK YOUR MOVE', W/2, H - 130, C.GOLD, 1);
   
-  drawPixelText('PICK YOUR MOVE', W/2, H - 46, C.GOLD, 1);
-  
+  // 2x2 grid of move buttons
   p1Wrestler.moves.forEach((m, i) => {
-    const x = 10 + i * 78;
-    const y = H - 36;
-    const selected = i === p1MoveSelect;
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const bx = 10 + col * 175;
+    const by = H - 118 + row * 52;
+    const bw = 168;
+    const bh = 46;
+    const sel = i === p1MoveSelect;
     
-    if (selected) {
-      drawRect(x - 2, y - 2, 74, 22, m.type === 'takedown' ? C.BRIGHT_RED : m.type === 'throw' ? C.BRIGHT_BLUE : m.type === 'pin' ? C.BRIGHT_GREEN : C.YELLOW);
-      drawOutline(x - 2, y - 2, 74, 22, C.WHITE);
+    const typeColor = m.type === 'takedown' ? C.BRIGHT_RED : m.type === 'throw' ? C.BRIGHT_BLUE : m.type === 'pin' ? C.BRIGHT_GREEN : C.YELLOW;
+    
+    if (sel) {
+      rect(bx, by, bw, bh, typeColor);
+      outline(bx, by, bw, bh, C.WHITE);
+    } else {
+      rect(bx, by, bw, bh, C.DARK_GRAY);
+      outline(bx, by, bw, bh, typeColor);
     }
     
-    const bgColor = selected ? C.BLACK : C.DARK_GRAY;
-    drawRect(x, y, 70, 18, bgColor);
-    drawPixelText(m.icon, x + 10, y + 8, selected ? C.WHITE : C.GRAY, 1);
-    drawPixelTextLeft(m.name, x + 24, y + 8, selected ? C.WHITE : C.GRAY, 1);
+    txt(m.icon, bx + 20, by + 18, sel ? C.BLACK : typeColor, 2);
+    txtL(m.name, bx + 40, by + 14, sel ? C.BLACK : C.WHITE, 1);
+    txt(m.type.toUpperCase(), bx + 100, by + 30, sel ? C.BLACK : C.GRAY, 1);
+    
+    addTouch('move' + i, bx, by, bw, bh);
   });
-  
-  // Arrow indicator
-  const arrowX = 10 + p1MoveSelect * 78 + 35;
-  if (Math.floor(titleAnim / 15) % 2 === 0) {
-    drawPixelText('^', arrowX, H - 52, C.YELLOW, 1);
-  }
 }
 
 function drawMoveAnim() {
-  drawMatch();
+  drawMatchBG();
+  touchAreas = [];
   
-  // Apply screen shake
-  if (shakeTimer > 0) {
-    ctx.save();
-    ctx.translate(shakeX, shakeY);
-    shakeTimer--;
-  }
+  if (shakeTimer > 0) { ctx.save(); ctx.translate(shakeX, shakeY); shakeTimer--; }
   
   if (animPhase === 'clash') {
-    // Both wrestlers bouncing/shaking
-    const shake = Math.sin(animTimer * 0.5) * 3;
-    drawWrestlerSprite(W/2 - 25 + shake, H/2 + 10, p1Wrestler, 1, animTimer, 2);
-    drawWrestlerSprite(W/2 + 25 - shake, H/2 + 10, p2Wrestler, -1, animTimer, 2);
-    
-    // Move names flash
-    drawPixelText(p1Move.name, W/2 - 60, H/2 - 20, p1Wrestler.color, 1);
-    drawPixelText(p2Move.name, W/2 + 60, H/2 - 20, p2Wrestler.color, 1);
-    
-    // Explosion effect
-    if (animTimer < 15) {
-      drawPixelText('!!', W/2, H/2 - 5, C.YELLOW, 2);
-    }
+    const sk = Math.sin(animTimer * 0.5) * 4;
+    drawWrestler(W/2 - 35 + sk, H/2 + 10, p1Wrestler, 1, animTimer, 2);
+    drawWrestler(W/2 + 35 - sk, H/2 + 10, p2Wrestler, -1, animTimer, 2);
+    txt(p1Move.name, W/2 - 80, H/2 - 40, p1Wrestler.color, 1);
+    txt(p2Move.name, W/2 + 80, H/2 - 40, p2Wrestler.color, 1);
+    if (animTimer < 15) txt('!!', W/2, H/2 - 10, C.GOLD, 3);
   } else if (animPhase === 'execute') {
-    const progress = takedownAnim / 45;
-    
-    if (resultText.includes(p1Wrestler.moves[0].name) || resultText.includes(p1Wrestler.moves[1].name) || resultText.includes(p1Wrestler.moves[2].name) || resultText.includes(p1Wrestler.moves[3].name)) {
-      // P1 wins - P2 goes down
-      drawWrestlerSprite(W/2, H/2 + 10 - progress * 5, p1Wrestler, 1, 0, 2);
-      if (progress > 0.3) {
-        drawWrestlerDown(W/2 + 20, H/2 + 15 + progress * 10, p2Wrestler, 1, 2);
-      } else {
-        drawWrestlerSprite(W/2 + 30, H/2 + 10 + progress * 15, p2Wrestler, -1, 0, 2);
-      }
+    const prog = takedownAnim / 45;
+    const p1Wins = resultText.includes(p1Wrestler.moves[0].name) || resultText.includes(p1Wrestler.moves[1].name) || resultText.includes(p1Wrestler.moves[2].name) || resultText.includes(p1Wrestler.moves[3].name);
+    if (p1Wins) {
+      drawWrestler(W/2, H/2 + 10 - prog * 5, p1Wrestler, 1, 0, 2);
+      if (prog > 0.3) drawWrestlerDown(W/2 + 30, H/2 + 15 + prog * 15, p2Wrestler, 1, 2);
+      else drawWrestler(W/2 + 40, H/2 + 10 + prog * 20, p2Wrestler, -1, 0, 2);
     } else if (resultText === 'STALEMATE!') {
-      // Both push back
-      drawWrestlerSprite(W/2 - 25 - progress * 15, H/2 + 10, p1Wrestler, 1, 0, 2);
-      drawWrestlerSprite(W/2 + 25 + progress * 15, H/2 + 10, p2Wrestler, -1, 0, 2);
+      drawWrestler(W/2 - 35 - prog * 20, H/2 + 10, p1Wrestler, 1, 0, 2);
+      drawWrestler(W/2 + 35 + prog * 20, H/2 + 10, p2Wrestler, -1, 0, 2);
     } else {
-      // P2 wins - P1 goes down
-      drawWrestlerSprite(W/2, H/2 + 10 - progress * 5, p2Wrestler, -1, 0, 2);
-      if (progress > 0.3) {
-        drawWrestlerDown(W/2 - 20, H/2 + 15 + progress * 10, p1Wrestler, -1, 2);
-      } else {
-        drawWrestlerSprite(W/2 - 30, H/2 + 10 + progress * 15, p1Wrestler, 1, 0, 2);
-      }
+      drawWrestler(W/2, H/2 + 10 - prog * 5, p2Wrestler, -1, 0, 2);
+      if (prog > 0.3) drawWrestlerDown(W/2 - 30, H/2 + 15 + prog * 15, p1Wrestler, -1, 2);
+      else drawWrestler(W/2 - 40, H/2 + 10 + prog * 20, p1Wrestler, 1, 0, 2);
     }
   } else if (animPhase === 'result') {
-    // Show result
-    drawWrestlerSprite(W/2 - 25, H/2 + 10, p1Wrestler, 1, 0, 2);
-    drawWrestlerSprite(W/2 + 25, H/2 + 10, p2Wrestler, -1, 0, 2);
-    
-    // Result banner
-    const bannerColor = resultText.includes('!') && !resultText.includes('STALEMATE') ? C.GOLD : C.LIGHT_GRAY;
-    drawRect(W/2 - 70, H/2 - 30, 140, 20, C.BLACK);
-    drawOutline(W/2 - 70, H/2 - 30, 140, 20, bannerColor);
-    drawPixelText(resultText, W/2, H/2 - 18, bannerColor, 1);
-    
-    // Points flash
-    if (resultTimer > 30 && Math.floor(resultTimer / 5) % 2 === 0) {
-      drawPixelText('+2', W/2 - 60, H/2 - 10, C.YELLOW, 1);
-    }
+    drawWrestler(W/2 - 35, H/2 + 10, p1Wrestler, 1, 0, 2);
+    drawWrestler(W/2 + 35, H/2 + 10, p2Wrestler, -1, 0, 2);
+    const bc = resultText.includes('!') && !resultText.includes('STALEMATE') ? C.GOLD : C.LIGHT_GRAY;
+    rect(W/2 - 90, H/2 - 40, 180, 24, C.BLACK); outline(W/2 - 90, H/2 - 40, 180, 24, bc);
+    txt(resultText, W/2, H/2 - 24, bc, 1);
+    if (resultTimer > 30 && Math.floor(resultTimer / 5) % 2 === 0) txt('+2', W/2 - 80, H/2 - 15, C.GOLD, 1);
     resultTimer--;
   }
   
-  if (shakeTimer > 0) {
-    ctx.restore();
-  }
+  if (shakeTimer >= 0) ctx.restore();
 }
 
-// ============================================================
 // PERIOD END
-// ============================================================
 function updatePeriodEnd() {
   periodEndTimer--;
   if (periodEndTimer <= 0) {
     period++;
     if (period > 3) {
-      // Match over - decide winner
-      state = STATES.MATCH_END;
-      matchEndTimer = 150;
-      if (p1Score > p2Score) {
-        resultText = p1Wrestler.name + ' WINS BY DECISION!';
-      } else if (p2Score > p1Score) {
-        resultText = p2Wrestler.name + ' WINS BY DECISION!';
-      } else {
-        resultText = 'DRAW!';
-      }
+      state = STATES.MATCH_END; matchEndTimer = 150;
+      if (p1Score > p2Score) resultText = p1Wrestler.name + ' WINS BY DECISION!';
+      else if (p2Score > p1Score) resultText = p2Wrestler.name + ' WINS BY DECISION!';
+      else resultText = 'DRAW!';
     } else {
-      moveClock = 30;
-      moveClockTimer = 0;
-      state = STATES.MATCH_INTRO;
-      matchIntroTimer = 90;
-      sfxWhistle();
+      moveClock = 30; moveClockTimer = 0;
+      state = STATES.MATCH_INTRO; matchIntroTimer = 90; sfxWhistle();
     }
   }
 }
 
 function drawPeriodEnd() {
-  drawMatch();
-  drawRect(0, 0, W, H, 'rgba(0,0,0,0.7)');
-  
+  drawMatchBG();
+  rect(0, 0, W, H, 'rgba(0,0,0,0.7)');
+  touchAreas = [];
   sfxBuzz();
-  
-  drawPixelText('END OF PERIOD ' + (period), W/2, H/2 - 20, C.GOLD, 2);
-  drawPixelText(p1Wrestler.name + ': ' + p1Score + '  ' + p2Wrestler.name + ': ' + p2Score, W/2, H/2 + 10, C.WHITE, 1);
+  txt('END OF PERIOD ' + period, W/2, H/2 - 30, C.GOLD, 2);
+  txt(p1Wrestler.name + ': ' + p1Score + '  ' + p2Wrestler.name + ': ' + p2Score, W/2, H/2 + 10, C.WHITE, 1);
 }
 
-// ============================================================
 // MATCH END
-// ============================================================
 function updateMatchEnd() {
   matchEndTimer--;
   if (matchEndTimer <= 0) {
-    const p1Won = p1Score > p2Score;
-    
-    if (p1Won) {
-      // Next round
+    if (p1Score > p2Score) {
       tournamentRound++;
-      if (tournamentRound >= tournamentOpponents.length) {
-        state = STATES.TOURNAMENT_WIN;
-        return;
-      }
+      if (tournamentRound >= tournamentOpponents.length) { state = STATES.TOURNAMENT_WIN; return; }
       p2Wrestler = tournamentOpponents[tournamentRound];
       p1Score = 0; p2Score = 0; p1Stamina = 100; p2Stamina = 100;
-      period = 1; moveClock = 30;
-      state = STATES.VERSUS;
-      versusTimer = 120;
-    } else {
-      state = STATES.GAME_OVER;
-    }
+      period = 1; moveClock = 30; state = STATES.VERSUS; versusTimer = 120;
+    } else { state = STATES.GAME_OVER; }
   }
 }
 
 function drawMatchEnd() {
-  drawMatch();
-  drawRect(0, 0, W, H, 'rgba(0,0,0,0.7)');
-  
+  drawMatchBG();
+  rect(0, 0, W, H, 'rgba(0,0,0,0.7)');
+  touchAreas = [];
   const winner = p1Score > p2Score ? p1Wrestler : p2Wrestler;
-  const flash = Math.floor(matchEndTimer / 8) % 2 === 0;
-  
-  drawPixelText(resultText, W/2, H/2 - 20, flash ? C.GOLD : C.YELLOW, 1);
-  drawPixelText(winner.name + ' WINS!', W/2, H/2 + 10, winner.color, 2);
-  
-  drawPixelText(p1Wrestler.name + ': ' + p1Score + '  ' + p2Wrestler.name + ': ' + p2Score, W/2, H/2 + 35, C.WHITE, 1);
+  const fl = Math.floor(matchEndTimer / 8) % 2 === 0;
+  txt(resultText, W/2, H/2 - 30, fl ? C.GOLD : C.YELLOW, 2);
+  txt(winner.name + ' WINS!', W/2, H/2 + 10, winner.color, 2);
+  txt(p1Wrestler.name + ': ' + p1Score + '  ' + p2Wrestler.name + ': ' + p2Score, W/2, H/2 + 40, C.WHITE, 1);
 }
 
-// ============================================================
 // TOURNAMENT WIN
-// ============================================================
 function drawTournamentWin() {
-  drawRect(0, 0, W, H, C.BLACK);
-  
-  // Celebration
+  rect(0, 0, W, H, C.BLACK);
+  touchAreas = [];
   const t = titleAnim++;
-  for (let i = 0; i < 5; i++) {
-    const px = Math.sin(t * 0.02 + i) * 100 + W/2;
-    const py = Math.cos(t * 0.03 + i * 2) * 80 + H/2;
-    drawRect(px, py, 4, 4, [C.GOLD, C.BRIGHT_RED, C.BRIGHT_BLUE, C.BRIGHT_GREEN, C.YELLOW][i]);
+  for (let i = 0; i < 8; i++) {
+    const px = Math.sin(t * 0.02 + i) * 120 + W/2;
+    const py = Math.cos(t * 0.03 + i * 2) * 100 + H/2;
+    rect(px, py, 6, 6, [C.GOLD, C.BRIGHT_RED, C.BRIGHT_BLUE, C.WHITE, C.YELLOW, C.BRIGHT_GREEN, C.RED, C.NAVY][i]);
   }
   
-  drawPixelText('CHAMPION!', W/2, 40, C.GOLD, 3);
-  drawPixelText(p1Wrestler.name, W/2, 80, p1Wrestler.color, 2);
-  drawPixelText('MAT KING', W/2, 105, C.YELLOW, 2);
+  // USA stripes
+  for (let i = 0; i < W; i += 16) { rect(i, 180, 8, 8, C.RED); rect(i + 8, 180, 8, 8, C.WHITE); }
+  rect(W/2 - 50, 180, 100, 8, C.NAVY);
   
-  drawWrestlerSprite(W/2, 150, p1Wrestler, 1, t, 2);
+  txt('CHAMPION!', W/2, 80, C.GOLD, 4);
+  txt(p1Wrestler.name, W/2, 140, p1Wrestler.color, 3);
+  txt('MAT KING', W/2, 210, C.YELLOW, 3);
+  
+  drawWrestler(W/2, 300, p1Wrestler, 1, t, 3);
   
   // Trophy
-  drawRect(W/2 - 6, 130, 12, 8, C.GOLD);
-  drawRect(W/2 - 3, 138, 6, 4, C.GOLD);
-  drawRect(W/2 - 8, 128, 16, 4, C.GOLD);
+  rect(W/2 - 10, 370, 20, 15, C.GOLD);
+  rect(W/2 - 5, 385, 10, 8, C.GOLD);
+  rect(W/2 - 15, 365, 30, 8, C.GOLD);
   
-  if (Math.floor(t / 30) % 2 === 0) {
-    drawPixelText('PRESS ENTER', W/2, H - 15, C.WHITE, 1);
+  if (Math.floor(t / 25) % 2 === 0) {
+    rect(W/2 - 80, H - 60, 160, 40, C.GOLD);
+    txt('TAP TO CONTINUE', W/2, H - 36, C.BLACK, 1);
   }
+  addTouch('restart', W/2 - 80, H - 60, 160, 40);
   
-  if (keys['Enter'] || keys['Space']) {
-    state = STATES.TITLE;
-    keys['Enter'] = false; keys['Space'] = false;
-  }
+  const tch = consumeTouch();
+  if (tch === 'restart' || keys['Enter'] || keys['Space']) { state = STATES.TITLE; keys['Enter'] = false; keys['Space'] = false; }
 }
 
-// ============================================================
 // GAME OVER
-// ============================================================
 function drawGameOver() {
-  drawRect(0, 0, W, H, C.BLACK);
+  rect(0, 0, W, H, C.BLACK);
+  touchAreas = [];
+  txt('ELIMINATED', W/2, 140, C.BRIGHT_RED, 3);
+  txt(p1Wrestler.name + ' LOSES', W/2, 200, C.LIGHT_GRAY, 2);
+  txt('ROUND ' + (tournamentRound + 1) + ' OF ' + tournamentOpponents.length, W/2, 240, C.GRAY, 1);
+  txt('FINAL: ' + p1Score + ' - ' + p2Score, W/2, 280, C.WHITE, 2);
   
-  drawPixelText('ELIMINATED', W/2, 60, C.BRIGHT_RED, 2);
-  drawPixelText(p1Wrestler.name + ' LOSES', W/2, 90, C.LIGHT_GRAY, 1);
-  drawPixelText('ROUND ' + (tournamentRound + 1) + ' OF ' + tournamentOpponents.length, W/2, 110, C.GRAY, 1);
-  
-  drawPixelText('FINAL SCORE: ' + p1Score + ' - ' + p2Score, W/2, 140, C.WHITE, 1);
-  
-  if (Math.floor(titleAnim++ / 30) % 2 === 0) {
-    drawPixelText('PRESS ENTER', W/2, H - 30, C.YELLOW, 1);
+  if (Math.floor(titleAnim++ / 25) % 2 === 0) {
+    rect(W/2 - 80, H - 60, 160, 40, C.BRIGHT_RED);
+    txt('TAP TO RETRY', W/2, H - 36, C.WHITE, 1);
   }
+  addTouch('restart', W/2 - 80, H - 60, 160, 40);
   
-  if (keys['Enter'] || keys['Space']) {
-    state = STATES.TITLE;
-    keys['Enter'] = false; keys['Space'] = false;
-  }
+  const tch = consumeTouch();
+  if (tch === 'restart' || keys['Enter'] || keys['Space']) { state = STATES.TITLE; keys['Enter'] = false; keys['Space'] = false; }
 }
 
-// ============================================================
 // MAIN LOOP
-// ============================================================
 function update() {
   switch (state) {
     case STATES.TITLE: updateTitle(); break;
@@ -982,10 +789,8 @@ function update() {
 }
 
 function draw() {
-  // Clear
-  ctx.fillStyle = C.BLACK;
-  ctx.fillRect(0, 0, W, H);
-  
+  touchAreas = [];
+  ctx.fillStyle = C.BLACK; ctx.fillRect(0, 0, W, H);
   switch (state) {
     case STATES.TITLE: drawTitle(); break;
     case STATES.SELECT: drawSelect(); break;
@@ -1000,13 +805,7 @@ function draw() {
   }
 }
 
-function gameLoop() {
-  update();
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-
-// Start
+function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
 titleAnim = 0;
 gameLoop();
 </script>
